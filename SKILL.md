@@ -236,10 +236,27 @@ The loop pauses and asks for input when:
 - A session enters `AWAITING_USER_FEEDBACK` state
 - You press Ctrl+C (graceful stop; saves state to `history.json`)
 
-To send a message to a mid-session Jules:
-```bash
-python scripts/jules_client.py send-message SESSION_ID "Your additional instructions"
+### When Jules asks a question (`AWAITING_USER_FEEDBACK`)
+
+The polling script fetches Jules' full question and prints it with the session
+URL — then keeps polling until Jules continues:
+
 ```
+  ============================================================
+  JULES HAS A QUESTION (session 1234567890)
+  ============================================================
+  I can see two approaches here — should I prioritise precision
+  or recall in the initial parameter set?
+  ------------------------------------------------------------
+  Respond at: https://jules.google.com/session/1234567890
+  Polling resumes automatically once you reply.
+  ============================================================
+```
+
+**Important:** `sendMessage` via API key is blocked by Google (requires OAuth).
+You must respond through the **Jules web UI** at the printed URL. The polling
+loop resumes automatically as soon as Jules receives your reply — you don't
+need to restart anything.
 
 ---
 
@@ -288,6 +305,30 @@ jules remote pull --session SESSION_ID
 ```
 
 The Python client is preferred for scripted loops; the CLI is good for quick one-offs.
+
+---
+
+## Operational realities (learned from testing)
+
+**Session latency:** Jules sessions typically take **15-20 minutes** to reach
+`COMPLETED` even when Jules finishes the actual work in under 2 minutes. The
+rest is Jules' internal state-transition overhead. Set `--timeout 3600`
+(default) and don't worry about it.
+
+**Always use `--auto-pr`** (or set `automationMode: AUTO_CREATE_PR` when
+calling the API directly). Without it, Jules produces a changeset internally
+but never pushes a branch or creates a PR — the work is lost when the session
+expires. This applies to all sessions that involve code changes.
+
+**Branch targeting:** Jules works off a starting branch. If a previous Jules
+session created a branch, point the next session at that branch (not `main`)
+or its changes won't be visible to Jules.
+
+**API key limitations:** The REST API key supports `GET /sessions`,
+`POST /sessions` (create), `DELETE /sessions`, and `GET /sessions/{id}`.
+It does **not** work for `POST .../sendMessage` or `GET .../activities` on
+certain sessions — those require OAuth. Use the CLI or web UI for interactive
+steps.
 
 ---
 
@@ -438,10 +479,12 @@ You have **15 parallel sessions/day** and **100 total/day** on Google AI Pro. Th
 
 **`Session FAILED`** → Check `session.json` for the failure reason. Jules may have encountered a dependency issue, permission error, or the task was unclear.
 
-**`AWAITING_USER_FEEDBACK` (stuck)**→ Jules has a question. Send a message:
-```bash
-python scripts/jules_client.py send-message SESSION_ID "Continue with default settings"
-```
+**`AWAITING_USER_FEEDBACK` (stuck)** → Jules has a question. The polling
+script prints Jules' full question and the session URL. Open the URL in your
+browser and reply there. Polling resumes automatically.
+
+**Note:** `sendMessage` via REST API key is blocked by Google — it requires
+OAuth. There is no programmatic workaround; the web UI is the only way.
 
 **Source not found** → The GitHub repo must be connected at `jules.google.com` before the API can use it.
 
